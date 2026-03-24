@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import anndata as ad
 from matplotlib import colors as mcolors
 from matplotlib.collections import LineCollection
-from matplotlib.patches import Patch
+from matplotlib.patches import Patch, Rectangle
 import pandas as pd
 from abc_atlas_access.abc_atlas_cache.abc_project_cache import AbcProjectCache
 
@@ -36,13 +36,13 @@ def parse_args():
     parser.add_argument('--no-export-sampling-mask', dest='export_sampling_mask', action='store_false')
     parser.add_argument('--show-sampling-grid', action='store_true', default=True)
     parser.add_argument('--hide-sampling-grid', dest='show_sampling_grid', action='store_false')
-    parser.add_argument('--point-size', type=float, default=0.5)
-    parser.add_argument('--dpi', type=int, default=600)
+    parser.add_argument('--point-size', type=float, default=3)
+    parser.add_argument('--dpi', type=int, default=300)
     parser.add_argument('--figure-width', type=float, default=8.0)
     parser.add_argument('--figure-min-height', type=float, default=4.5)
     parser.add_argument('--figure-max-height', type=float, default=9.5)
     parser.add_argument('--grid-linewidth', type=float, default=0.25)
-    parser.add_argument('--grid-alpha', type=float, default=0.7)
+    parser.add_argument('--grid-alpha', type=float, default=0.3)
     parser.add_argument('--mask-preview-max-points', type=int, default=500000)
     return parser.parse_args()
 
@@ -137,6 +137,51 @@ def build_substructure_color_map(substructure_values):
         color_map[substructure] = mcolors.to_hex(rgb)
 
     return color_map
+
+
+def resolve_grid_label(section_cells, label_col, args):
+    """Assign one label to each sampled grid with tie-break by nearest-to-center cell."""
+    if label_col is None or label_col not in section_cells.columns or len(section_cells) == 0:
+        return pd.DataFrame(columns=['grid_row', 'grid_col', 'label'])
+
+    period_um = args.grid_block_um + args.grid_gap_um
+
+    work_df = section_cells[['x', 'y', label_col]].copy()
+
+    def _normalize_label(value):
+        if pd.isna(value):
+            return 'Unknown'
+        text = str(value).strip()
+        if text == '' or text.lower() in {'nan', 'none', 'null'}:
+            return 'Unknown'
+        return text
+
+    work_df['label'] = [_normalize_label(value) for value in work_df[label_col].values]
+
+    grid_row, grid_col = compute_grid_indices_from_xy(work_df['x'], work_df['y'], args.grid_block_um, args.grid_gap_um)
+    work_df['grid_row'] = grid_row
+    work_df['grid_col'] = grid_col
+    work_df['x_um'] = work_df['x'].to_numpy(dtype=np.float64) * SECTION_XY_MM_TO_UM
+    work_df['y_um'] = work_df['y'].to_numpy(dtype=np.float64) * SECTION_XY_MM_TO_UM
+
+    records = []
+    for (row, col), group in work_df.groupby(['grid_row', 'grid_col'], sort=False):
+        type_counts = group['label'].value_counts()
+        max_count = int(type_counts.iloc[0])
+        top_types = type_counts[type_counts == max_count].index.tolist()
+
+        if len(top_types) == 1:
+            chosen_type = top_types[0]
+        else:
+            x_center = col * period_um + args.grid_block_um / 2.0
+            y_center = row * period_um + args.grid_block_um / 2.0
+            tie_group = group[group['label'].isin(top_types)].copy()
+            tie_group['dist2'] = (tie_group['x_um'] - x_center) ** 2 + (tie_group['y_um'] - y_center) ** 2
+            chosen_type = tie_group.sort_values('dist2', ascending=True).iloc[0]['label']
+
+        records.append({'grid_row': int(row), 'grid_col': int(col), 'label': chosen_type})
+
+    return pd.DataFrame(records)
 
 
 def compute_keep_mask_from_xy(x_mm, y_mm, grid_block_um, grid_gap_um):
@@ -379,8 +424,8 @@ def plot_dataset_parcellation(section_cells, output_path, substructure_color_map
                 title='Substructure',
                 loc='upper left',
                 frameon=False,
-                fontsize=6,
-                title_fontsize=8,
+                fontsize=12,
+                title_fontsize=14,
                 handlelength=1.2,
                 handleheight=1.2,
                 borderaxespad=0.0,
@@ -392,7 +437,109 @@ def plot_dataset_parcellation(section_cells, output_path, substructure_color_map
     fig.suptitle(
         f'CCF Parcellation Substructure ({len(section_cells)} cells)\n'
         f'Physical span: {x_span_um:.0f} × {y_span_um:.0f} µm',
-        fontsize=13
+        fontsize=14
+    )
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=args.dpi, bbox_inches='tight')
+    print(f"Saved: {output_path}")
+    plt.close()
+
+
+def plot_substructure_grid_fill(section_cells, output_path, substructure_color_map, args, fixed_limits=None):
+    """Plot sampled grid squares filled by substructure per grid.
+
+    Rule:
+    - choose majority substructure in each grid;
+    - if tie, choose substructure of the nearest cell to grid center.
+    """
+    if len(section_cells) == 0:
+        return
+
+    x_vals_um = section_cells['x'].to_numpy(dtype=np.float64) * SECTION_XY_MM_TO_UM
+    y_vals_um = section_cells['y'].to_numpy(dtype=np.float64) * SECTION_XY_MM_TO_UM
+    x_min = float(x_vals_um.min())
+    x_max = float(x_vals_um.max())
+    y_min = float(y_vals_um.min())
+    y_max = float(y_vals_um.max())
+
+    x_span_um = x_max - x_min
+    y_span_um = y_max - y_min
+    x_pad = max(100.0, x_span_um * 0.03)
+    y_pad = max(100.0, y_span_um * 0.03)
+
+    if fixed_limits is not None:
+        x_plot_min, x_plot_max, y_plot_min, y_plot_max = fixed_limits
+    else:
+        x_plot_min = x_min - x_pad
+        x_plot_max = x_max + x_pad
+        y_plot_min = y_min - y_pad
+        y_plot_max = y_max + y_pad
+
+    width = args.figure_width
+    height = width * (y_plot_max - y_plot_min) / (x_plot_max - x_plot_min)
+    height = max(args.figure_min_height, min(args.figure_max_height, height))
+
+    fig, (ax, legend_ax) = plt.subplots(
+        1,
+        2,
+        figsize=(width + 3.0, height),
+        gridspec_kw={'width_ratios': [4.5, 1.8]},
+    )
+
+    grid_type_df = resolve_grid_label(section_cells, 'parcellation_substructure', args)
+    period_um = args.grid_block_um + args.grid_gap_um
+    for _, rec in grid_type_df.iterrows():
+        row = int(rec['grid_row'])
+        col = int(rec['grid_col'])
+        substructure = rec['label']
+        x0 = col * period_um
+        y0 = row * period_um
+        rect = Rectangle(
+            (x0, y0),
+            args.grid_block_um,
+            args.grid_block_um,
+            facecolor=substructure_color_map.get(substructure, '#B0B0B0'),
+            edgecolor='none',
+            alpha=0.95,
+        )
+        ax.add_patch(rect)
+
+    ax.set_aspect('equal')
+    ax.set_xlabel('X (µm)', fontsize=10)
+    ax.set_ylabel('Y (µm)', fontsize=10)
+    ax.set_xlim(x_plot_min, x_plot_max)
+    ax.set_ylim(y_plot_max, y_plot_min)
+
+    #if args.show_sampling_grid:
+        #add_sampling_grid(ax, x_plot_min, x_plot_max, y_plot_min, y_plot_max, args)
+
+    legend_ax.axis('off')
+    if len(grid_type_df) > 0:
+        types_present = sorted(set(grid_type_df['label'].tolist()))
+        legend_handles = [
+            Patch(facecolor=substructure_color_map.get(name, '#B0B0B0'), edgecolor='none', label=name)
+            for name in types_present
+        ]
+        if len(legend_handles) > 0:
+            legend_ax.legend(
+                handles=legend_handles,
+                title='Substructure',
+                loc='upper left',
+                frameon=False,
+                fontsize=12,
+                title_fontsize=14,
+                handlelength=1.2,
+                handleheight=1.2,
+                borderaxespad=0.0,
+            )
+
+    ax.set_title('Sampled Grid Filled by Substructure', fontsize=11)
+    ax.grid(True, alpha=0.2)
+
+    fig.suptitle(
+        f'Substructure Grid Fill ({len(grid_type_df)} sampled grids)\n'
+        f'Tie-break: nearest cell to grid center',
+        fontsize=14,
     )
     plt.tight_layout()
     plt.savefig(output_path, dpi=args.dpi, bbox_inches='tight')
@@ -599,6 +746,18 @@ def main():
                 args,
                 fixed_limits=dataset_fixed_limits,
             )
+
+            if len(substructure_color_map) > 0 and 'parcellation_substructure' in sampled_cells.columns:
+                substructure_out_name = f'{out_prefix}_substructure_grid_fill.png'
+                substructure_image_path = sample_dir / substructure_out_name
+                plot_substructure_grid_fill(
+                    sampled_cells,
+                    substructure_image_path,
+                    substructure_color_map,
+                    args,
+                    fixed_limits=dataset_fixed_limits,
+                )
+
             dataset_image_count += 1
 
             stats_records.append(

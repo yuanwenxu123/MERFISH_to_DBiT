@@ -69,10 +69,10 @@ By default, this runs both steps with the built-in defaults.
 ### Results
 <p align="center">
     <a href="docs/image/cell.png">
-        <img src="docs/image/cell.png" height="400" />
+        <img src="docs/image/cell.png" height="300" />
     </a>
     <a href="docs/image/grid.png">
-        <img src="docs/image/grid.png" height="400" />
+        <img src="docs/image/grid.png" height="300" />
     </a>
 </p>
 

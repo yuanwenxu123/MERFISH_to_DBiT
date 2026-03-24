@@ -37,13 +37,13 @@ def parse_args():
     parser.add_argument("--step1-export-sampling-mask", action="store_true", default=True)
     parser.add_argument("--step1-no-export-sampling-mask", dest="step1_export_sampling_mask", action="store_false")
 
-    parser.add_argument("--step1-point-size", type=float, default=0.5)
-    parser.add_argument("--step1-dpi", type=int, default=600)
+    parser.add_argument("--step1-point-size", type=float, default=3)
+    parser.add_argument("--step1-dpi", type=int, default=300)
     parser.add_argument("--step1-figure-width", type=float, default=8.0)
     parser.add_argument("--step1-figure-min-height", type=float, default=4.5)
     parser.add_argument("--step1-figure-max-height", type=float, default=9.5)
     parser.add_argument("--step1-grid-linewidth", type=float, default=0.25)
-    parser.add_argument("--step1-grid-alpha", type=float, default=0.7)
+    parser.add_argument("--step1-grid-alpha", type=float, default=0.3)
     parser.add_argument("--step1-mask-preview-max-points", type=int, default=500000)
 
     parser.add_argument("--cluster-input-dir", type=Path, default=None, help="Default: <download-base>/../output/sampled_h5ad")
