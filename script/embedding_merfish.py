@@ -194,12 +194,6 @@ def run_seurat_integration_and_transfer(ref_adata, merfish_adata, cluster_col, n
     return merfish_out, integrated_meta_adata
 
 
-def make_cluster_color_map(labels):
-    uniq = sorted([x for x in pd.Series(labels).dropna().astype(str).unique()])
-    cmap = plt.get_cmap('tab20', max(2, len(uniq)))
-    return {lab: cmap(i) for i, lab in enumerate(uniq)}
-
-
 def sanitize_filename(text: str) -> str:
     return ''.join(ch if ch.isalnum() or ch in ('-', '_', '.') else '_' for ch in str(text)).strip('_') or 'unknown'
 
@@ -419,7 +413,7 @@ def main():
     abc_cache = AbcProjectCache.from_cache_dir(args.download_base)
 
     if os.path.exists(embedding_output_path / 'combined_reference.h5ad'):
-        print("Combined reference AnnData already exists, loading from file...")
+        print("Combined reference data already exists, loading from file...")
         ref_adata = ad.read_h5ad(embedding_output_path / 'combined_reference.h5ad')
     else:
         print("Loading cell metadata...")

@@ -11,7 +11,7 @@ Features:
 
 import argparse
 from pathlib import Path
-
+import math
 import anndata as ad
 import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
@@ -47,6 +47,7 @@ def parse_args():
     )
     parser.add_argument("--grid-cmap", type=str, default="tab20")
     parser.add_argument("--grid-dpi", type=int, default=300)
+    parser.add_argument("--umap-point-size", type=float, default=6.0)
     parser.add_argument("--figure-width", type=float, default=8.0)
     parser.add_argument("--figure-min-height", type=float, default=4.5)
     parser.add_argument("--figure-max-height", type=float, default=9.5)
@@ -68,8 +69,9 @@ def ensure_output_dirs(base_dir: Path):
     dirs = {
         "single_h5ad": base_dir / "single_h5ad",
         "single_grid_png": base_dir / "single_grid_png",
+        "single_umap_png": base_dir / "single_umap_png",
         "merged_h5ad": base_dir / "merged_h5ad",
-        "merged_grid_png": base_dir / "merged_grid_png",
+        "merged_umap_png": base_dir / "merged_umap_png",
         "reports": base_dir / "reports",
     }
     for path in dirs.values():
@@ -192,14 +194,17 @@ def cluster_matrix(X, embedding_dim: int, random_state: int, normalization: str,
         directed=False,
         n_iterations=2,
     )
+    sc.tl.umap(adata_tmp, random_state=random_state)
 
     labels = adata_tmp.obs["leiden"].astype(str).to_numpy()
-    return pd.Categorical(labels).codes.astype(np.int64)
+    return pd.Categorical(labels).codes.astype(np.int64), adata_tmp.obsm["X_umap"].astype(np.float32)
 
 
-def aggregate_expression_by_grid(X, grid_keys, aggregate: str):
-    grid_key_index = pd.Index(grid_keys)
-    grid_codes, unique_keys = pd.factorize(grid_key_index, sort=False)
+def aggregate_expression_by_grid(X, key_df: pd.DataFrame, aggregate: str):
+
+    key_cols = key_df.columns.tolist()
+    key_tuples = list(key_df.itertuples(index=False, name=None))
+    grid_codes, unique_keys = pd.factorize(pd.Series(key_tuples), sort=False)
     n_cells = grid_codes.shape[0]
     n_grids = len(unique_keys)
 
@@ -216,7 +221,7 @@ def aggregate_expression_by_grid(X, grid_keys, aggregate: str):
     else:
         X_grid = X_sum
 
-    grid_df = pd.DataFrame(unique_keys.tolist(), columns=["grid_row", "grid_col"])
+    grid_df = pd.DataFrame(list(unique_keys.to_numpy()), columns=key_cols)
     grid_df["cell_count"] = counts.astype(np.int64)
     return X_grid, grid_df, grid_codes
 
@@ -251,8 +256,6 @@ def render_grid_png(
     row_max = int(grid_df["grid_row"].max())
     col_min = int(grid_df["grid_col"].min())
     col_max = int(grid_df["grid_col"].max())
-    height = row_max - row_min + 1
-    width = col_max - col_min + 1
 
     if fixed_limits is None:
         x_min = col_min * period_um
@@ -317,21 +320,21 @@ def render_grid_png(
     plt.close(fig)
 
 
-def cluster_on_grids(adata: ad.AnnData, args, cluster_col: str):
-    required_cols = ["sampling_grid_row", "sampling_grid_col"]
+def cluster_on_grids(adata: ad.AnnData, args, cluster_col: str, group_cols: list[str]):
+    required_cols = list(dict.fromkeys(group_cols + ["sampling_grid_row", "sampling_grid_col"]))
     for col in required_cols:
         if col not in adata.obs.columns:
             raise ValueError(f"missing required obs column '{col}'")
 
-    grid_keys = list(
-        zip(
-            adata.obs["sampling_grid_row"].astype(int).to_numpy(),
-            adata.obs["sampling_grid_col"].astype(int).to_numpy(),
-        )
-    )
-    X_grid, grid_df, grid_codes = aggregate_expression_by_grid(adata.X, grid_keys, args.grid_aggregate)
+    key_df = adata.obs[group_cols].copy()
+    if "sampling_grid_row" in key_df.columns:
+        key_df["sampling_grid_row"] = key_df["sampling_grid_row"].astype(int)
+    if "sampling_grid_col" in key_df.columns:
+        key_df["sampling_grid_col"] = key_df["sampling_grid_col"].astype(int)
 
-    grid_labels = cluster_matrix(
+    X_grid, grid_df, grid_codes = aggregate_expression_by_grid(adata.X, key_df, args.grid_aggregate)
+
+    grid_labels, umap_coords = cluster_matrix(
         X_grid,
         embedding_dim=args.embedding_dim,
         random_state=args.random_state,
@@ -343,7 +346,77 @@ def cluster_on_grids(adata: ad.AnnData, args, cluster_col: str):
     grid_df["cluster"] = grid_labels
     cell_labels = grid_labels[grid_codes]
     adata.obs[cluster_col] = cell_labels.astype(np.int64)
+    adata.obs["umap_coord1"] = umap_coords[grid_codes, 0]
+    adata.obs["umap_coord2"] = umap_coords[grid_codes, 1]
+    
     return adata, grid_df
+
+
+def plot_umap(adata: ad.AnnData, output_png: Path,
+              title: str, dpi: int, point_size: float, cmap_name: str):
+    if "parcellation_substructure" not in adata.obs.columns:
+        print(f"Warning: Required columns not found in adata.obs; skipping UMAP plot")
+        return
+    if "cluster_single" in adata.obs.columns:
+        labels = adata.obs["cluster_single"].fillna("Unknown").astype(str)
+    elif "cluster_merged" in adata.obs.columns:
+        labels = adata.obs["cluster_merged"].fillna("Unknown").astype(str)
+    else:
+        print(f"Warning: No cluster column found in adata.obs; skipping UMAP plot")
+        return
+    categories = list(pd.Categorical(labels).categories)
+    cat_codes = pd.Categorical(labels, categories=categories).codes
+    cmap = plt.get_cmap(cmap_name, max(2, len(categories)))
+
+    umap_xy = adata.obs[["umap_coord1", "umap_coord2"]].to_numpy(dtype=np.float32)
+
+    fig, ax = plt.subplots(1, 2, figsize=(16, 6))
+    ax[0].scatter(
+        umap_xy[:, 0],
+        umap_xy[:, 1],
+        c=cat_codes,
+        cmap=cmap,
+        s=point_size,
+        linewidths=0,
+        alpha=0.9,
+    )
+    ax[0].set_xlabel("UMAP1")
+    ax[0].set_ylabel("UMAP2")
+
+    handles = [
+        plt.Line2D([0], [0], marker='o', linestyle='', color=cmap(i), label=cat, markersize=5)
+        for i, cat in enumerate(categories)
+    ]
+    ax[0].legend(handles=handles, title="Cluster", loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False, fontsize=7)
+
+    ax[1].scatter(
+        umap_xy[:, 0],
+        umap_xy[:, 1],
+        c=adata.obs["parcellation_substructure"].astype("category").cat.codes,
+        cmap="tab20",
+        s=point_size,
+        linewidths=0,
+        alpha=0.9,
+    )
+    ax[1].set_xlabel("UMAP1")
+    ax[1].set_ylabel("UMAP2")
+
+    handles_sub = [
+        plt.Line2D([0], [0], marker='o', linestyle='', 
+                   color=plt.get_cmap("tab20", len(adata.obs["parcellation_substructure"].unique()))(i), 
+                   label=cat, markersize=5)
+        for i, cat in enumerate(adata.obs["parcellation_substructure"].astype("category").cat.categories)
+    ]
+    if len(adata.obs["parcellation_substructure"].unique()) < 16:       
+        ax[1].legend(handles=handles_sub, title="Substructure", loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False, fontsize=7)
+    else:
+        ax[1].legend(handles=handles_sub, ncol=math.ceil(len(adata.obs["parcellation_substructure"].unique()) / 16), 
+                     title="Substructure", loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False, fontsize=7)
+
+    fig.suptitle(title)
+    fig.tight_layout()
+    fig.savefig(output_png, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
 
 
 def process_single_file(h5ad_path: Path, dirs: dict, args, sample_fixed_limits: dict):
@@ -351,11 +424,11 @@ def process_single_file(h5ad_path: Path, dirs: dict, args, sample_fixed_limits: 
     grid_block_um, grid_gap_um = extract_sampling_params(adata, args)
     sample_key = infer_sample_key_from_path(h5ad_path, args.input_dir)
 
-    adata, grid_df = cluster_on_grids(adata, args, cluster_col="cluster_single")
-    adata.obs["sample_key"] = sample_key
+    group_cols = ["sampling_grid_row", "sampling_grid_col"]
+    adata, grid_df = cluster_on_grids(adata, args, cluster_col="cluster_single", group_cols=group_cols)
     adata.uns["grid_clustering"] = {
         "level": "grid",
-        "aggregate": args.grid_aggregate,
+        "aggregate": "sum",
         "method": "leiden",
         "leiden_resolution": args.leiden_resolution,
         "leiden_n_neighbors": args.leiden_n_neighbors,
@@ -364,13 +437,16 @@ def process_single_file(h5ad_path: Path, dirs: dict, args, sample_fixed_limits: 
     }
 
     out_h5ad = dirs["single_h5ad"] / f"{h5ad_path.stem}_clustered.h5ad"
-    adata.write_h5ad(out_h5ad, compression="lzf")
+    adata.write_h5ad(out_h5ad, compression="gzip")
 
     out_png = dirs["single_grid_png"] / f"{h5ad_path.stem}_grid_cluster.png"
+    grid_df_for_plot = grid_df.rename(
+        columns={"sampling_grid_row": "grid_row", "sampling_grid_col": "grid_col"}
+    )
     render_grid_png(
-        grid_df,
+        grid_df_for_plot,
         output_png=out_png,
-        title=f"Single-file grid cluster\n{h5ad_path.stem}",
+        title=f"Single-file grid cluster {h5ad_path.stem}",
         cmap_name=args.grid_cmap,
         dpi=args.grid_dpi,
         grid_block_um=grid_block_um,
@@ -379,6 +455,16 @@ def process_single_file(h5ad_path: Path, dirs: dict, args, sample_fixed_limits: 
         figure_min_height=args.figure_min_height,
         figure_max_height=args.figure_max_height,
         fixed_limits=sample_fixed_limits.get(sample_key),
+    )
+
+    out_umap_png = dirs["single_umap_png"] / f"{h5ad_path.stem}_umap_cluster.png"
+    plot_umap(
+        adata,
+        output_png=out_umap_png,
+        title=f"Single-file UMAP {h5ad_path.stem}",
+        dpi=args.grid_dpi,
+        point_size=args.umap_point_size,
+        cmap_name=args.grid_cmap,
     )
 
     return {
@@ -389,6 +475,7 @@ def process_single_file(h5ad_path: Path, dirs: dict, args, sample_fixed_limits: 
         "n_clusters_observed": int(grid_df["cluster"].nunique()),
         "single_h5ad": str(out_h5ad),
         "single_grid_png": str(out_png),
+        "single_umap_png": str(out_umap_png),
     }
 
 
@@ -398,8 +485,6 @@ def process_merged_sample(sample_key: str, file_paths: list[Path], dirs: dict, a
     for path in file_paths:
         adata = ad.read_h5ad(path)
         adata.obs = adata.obs.copy()
-        adata.obs["source_file"] = path.name
-        adata.obs["sample_key"] = sample_key
         sampling_params.append(extract_sampling_params(adata, args))
         adatas.append(adata)
 
@@ -409,10 +494,11 @@ def process_merged_sample(sample_key: str, file_paths: list[Path], dirs: dict, a
     if len(inconsistent) > 0:
         print(f"Warning: {sample_key} has mixed sampling params across files; using first one ({grid_block_um}, {grid_gap_um})")
 
-    merged, grid_df = cluster_on_grids(merged, args, cluster_col="cluster_merged")
+    group_cols = ["brain_section_label", "sampling_grid_row", "sampling_grid_col"]
+    merged, grid_df = cluster_on_grids(merged, args, cluster_col="cluster_merged", group_cols=group_cols)
     merged.uns["grid_clustering"] = {
         "level": "grid",
-        "aggregate": args.grid_aggregate,
+        "aggregate": "sum",
         "method": "leiden",
         "leiden_resolution": args.leiden_resolution,
         "leiden_n_neighbors": args.leiden_n_neighbors,
@@ -421,31 +507,25 @@ def process_merged_sample(sample_key: str, file_paths: list[Path], dirs: dict, a
     }
 
     out_h5ad = dirs["merged_h5ad"] / f"{sample_key}_merged_clustered.h5ad"
-    merged.write_h5ad(out_h5ad, compression="lzf")
+    merged.write_h5ad(out_h5ad, compression="gzip")
 
-    out_png = dirs["merged_grid_png"] / f"{sample_key}_merged_grid_cluster.png"
-    render_grid_png(
-        grid_df,
+    out_png = dirs["merged_umap_png"] / f"{sample_key}_merged_umap.png"
+    plot_umap(
+        merged,
         output_png=out_png,
-        title=f"Merged grid cluster\n{sample_key}",
-        cmap_name=args.grid_cmap,
+        title=f"Merged UMAP {sample_key}",
         dpi=args.grid_dpi,
-        grid_block_um=grid_block_um,
-        grid_gap_um=grid_gap_um,
-        figure_width=args.figure_width,
-        figure_min_height=args.figure_min_height,
-        figure_max_height=args.figure_max_height,
-        fixed_limits=sample_fixed_limits.get(sample_key),
+        point_size=args.umap_point_size,
+        cmap_name=args.grid_cmap,
     )
 
     return {
         "sample_key": sample_key,
         "files": len(file_paths),
         "cells": int(merged.n_obs),
-        "grids": int(len(grid_df)),
         "n_clusters_observed": int(grid_df["cluster"].nunique()),
         "merged_h5ad": str(out_h5ad),
-        "merged_grid_png": str(out_png),
+        "merged_umap_png": str(out_png),
     }
 
 
