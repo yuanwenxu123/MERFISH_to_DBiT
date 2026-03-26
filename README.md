@@ -4,9 +4,11 @@ This folder provides a master controller to run the full pipeline end-to-end:
 
 1. Step 1: `ccf_registration_to_image.py`  
    (CCF visualization + grid sampling + sampled h5ad export)
-2. Step 2: `cluster_sampled_h5ad.py`  
+2. Step 1.5: `analyze_substructure_distribution.py`  
+   (Quantity analysis + interpolation)
+3. Step 2: `cluster_sampled_h5ad.py`  
    (grid-level aggregation + Leiden clustering + single/merged outputs)
-3. Step 3 (optional): `embedding_merfish.py`  
+4. Step 3 (optional): `embedding_merfish.py`  
   (reference integration with SeuratIntegration + label transfer + section-wise grid plots)
 
 Master entry point: `run_merfish_pipeline.py`
@@ -43,7 +45,7 @@ python run_merfish_pipeline.py \
   --run-step3 --division brain_region
 ```
 
-By default, this runs Step 1 + Step 2 with the built-in defaults.
+By default, this runs Step 1 + Step 1.5 + Step 2 with the built-in defaults.
 
 Use `--run-step3` to additionally run embedding/integration.
 
@@ -61,6 +63,14 @@ Use `--run-step3` to additionally run embedding/integration.
   - `sampling_mask/`
   - `sampled_h5ad/`
   - `sampling_stats_*.txt`
+
+### step 1.5 (default)
+- Input: `<download-base>/../output_<expression-matrix-kind>/sampled_h5ad`
+- Output: `<download-base>/../output_<expression-matrix-kind>/analysis_substructure_distribution`
+- Main outputs:
+  - `individual_substructure_plots_interp/`
+  - `individual_substructure_plots_raw/`
+  - `substructure_span_summary.csv`
 
 ### Step 2 (default)
 - Input: `<download-base>/../output_<expression-matrix-kind>/sampled_h5ad`
@@ -158,12 +168,11 @@ python run_merfish_pipeline.py \
 ### Global
 - `--python-exe`: Python executable used to launch sub-scripts
 - `--scripts-dir`: script directory (defaults to current file location)
-- `--skip-step1` / `--skip-step2`: skip a step
+- `--skip-step1` / `--skip-step1-5` / `--skip-step2`: skip a step
 - `--run-step3`: enable optional embedding/integration step
 - `--dry-run`: print commands without execution
 - Unified plotting args:
-  - `--point-size` (used by Step1 and Step3)
-  - `--dpi` (used by Step1/Step2/Step3)
+  - `--dpi` (used by Step1/Step1.5/Step2/Step3)
   - `--figure-width` / `--figure-min-height` / `--figure-max-height`
 
 ### Step 1
@@ -175,6 +184,15 @@ python run_merfish_pipeline.py \
 - `--step1-show-sampling-grid` / `--step1-hide-sampling-grid`
 - `--step1-export-sampled-h5ad` / `--step1-no-export-sampled-h5ad`
 - `--step1-export-sampling-mask` / `--step1-no-export-sampling-mask`
+
+### Step 1.5
+- `--datasets`
+- `--section-spacing-um`
+- `--interp-spacing-um`
+- `-figure-width-1-5`
+- `--figure-height-1-5`
+- `--line-width`
+- `-marker-size`
 
 ### Step 2
 - `--cluster-input-dir` / `--cluster-output-dir`
