@@ -578,7 +578,7 @@ def write_sampling_stats_txt(stats_path, stats_records, dataset_summaries):
 
 def main():
     args = parse_args()
-    output_dir = args.download_base.parent / 'output'
+    output_dir = args.download_base.parent / f'output_{args.expression_matrix_kind}'
     output_dir.mkdir(exist_ok=True, parents=True)
     sampling_image_dir = output_dir / 'sampling_images'
     sampled_h5ad_dir = output_dir / 'sampled_h5ad'

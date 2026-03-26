@@ -6,6 +6,8 @@ This folder provides a master controller to run the full pipeline end-to-end:
    (CCF visualization + grid sampling + sampled h5ad export)
 2. Step 2: `cluster_sampled_h5ad.py`  
    (grid-level aggregation + Leiden clustering + single/merged outputs)
+3. Step 3 (optional): `embedding_merfish.py`  
+  (reference integration with SeuratIntegration + label transfer + section-wise grid plots)
 
 Master entry point: `run_merfish_pipeline.py`
 
@@ -19,13 +21,13 @@ Master entry point: `run_merfish_pipeline.py`
 ```bash
 conda create -n merfish-dbit python=3.12 -y
 conda activate merfish-dbit
-pip install numpy pandas matplotlib scipy scikit-learn anndata scanpy abc-atlas-access h5py
+pip install numpy pandas matplotlib scipy scikit-learn anndata scanpy abc-atlas-access h5py pybedtools allcools opentsne dask tpot-imblearn
 ```
 
 ### Quick dependency check
 
 ```bash
-python -c "import anndata, scanpy, abc_atlas_access, sklearn, matplotlib, pandas, numpy, scipy; print('OK')"
+python -c "import anndata, scanpy, abc_atlas_access, sklearn, matplotlib, pandas, numpy, scipy, allcools; print('OK')"
 ```
 
 ---
@@ -36,19 +38,24 @@ From script directory:
 
 ```bash
 python run_merfish_pipeline.py \
-  --download-base /path/to/download
-  --datasets MERFISH_dataset
+  --download-base /path/to/download \
+  --datasets MERFISH_dataset \
+  --run-step3 --division brain_region
 ```
 
-By default, this runs both steps with the built-in defaults.
+By default, this runs Step 1 + Step 2 with the built-in defaults.
+
+Use `--run-step3` to additionally run embedding/integration.
+
+`--run-step3` needs to be performed under the specified `--division`
 
 ---
 
 ## 3. Input/Output
 
 ### Step 1 (default)
-- Input base: `<download-base>`
-- Output root: `<download-base>/../output`
+- Input base: `<download-base>` If not downloaded in advance, it will be automatically downloaded to the folder provided.
+- Output root: `<download-base>/../output_<expression-matrix-kind>`
 - Main outputs:
   - `sampling_images/`
   - `sampling_mask/`
@@ -56,8 +63,8 @@ By default, this runs both steps with the built-in defaults.
   - `sampling_stats_*.txt`
 
 ### Step 2 (default)
-- Input: `<download-base>/../output/sampled_h5ad`
-- Output: `<download-base>/../output/cluster_results`
+- Input: `<download-base>/../output_<expression-matrix-kind>/sampled_h5ad`
+- Output: `<download-base>/../output_<expression-matrix-kind>/cluster_results`
 - Main outputs:
   - `single_h5ad/`
   - `single_grid_png/`
@@ -80,6 +87,17 @@ By default, this runs both steps with the built-in defaults.
     <sub>Left: Sampling results | Right: Cluster (click images for full size)</sub>
 </p>
 
+### Step 3 outputs (when `--run-step3` is enabled)
+- Input: `<download-base>/../output_<expression-matrix-kind>/cluster_results/merged_h5ad`
+- Output: `<download-base>/../output_<expression-matrix-kind>/embedding`
+- Main outputs:
+  - `combined_reference.h5ad`
+  - `combined_merfish.h5ad`
+  - `reference_merfish_integrated_obs.h5ad`
+  - `merfish_with_transferred_cluster.h5ad`
+  - `plots/merfish_all_datasets_grid_cluster.png`
+  - `plots/brain_section_*_grid_cluster.png`
+
 ---
 
 ## 4. Common Commands
@@ -97,7 +115,19 @@ python run_merfish_pipeline.py \
   --leiden-n-neighbors 15
 ```
 
-### 4.2 Run only Step 2 (reuse existing sampled_h5ad)
+### 4.2 Run full pipeline + Step 3 integration
+
+```bash
+python run_merfish_pipeline.py \
+  --download-base /path/to/download \
+  --datasets Zhuang-ABCA-1,Zhuang-ABCA-2 \
+  --division HY \
+  --expression-matrix-kind log2 \
+  --run-step3 \
+  --reference-dataset WMB-10Xv2,WMB-10Xv3,WMB-10XMulti
+```
+
+### 4.3 Run only Step 2 (reuse existing sampled_h5ad)
 
 ```bash
 python run_merfish_pipeline.py \
@@ -105,7 +135,7 @@ python run_merfish_pipeline.py \
   --download-base /path/to/download
 ```
 
-### 4.3 Run only Step 1
+### 4.4 Run only Step 1
 
 ```bash
 python run_merfish_pipeline.py \
@@ -113,7 +143,7 @@ python run_merfish_pipeline.py \
   --download-base /path/to/download
 ```
 
-### 4.4 Dry-run (print commands only)
+### 4.5 Dry-run (print commands only)
 
 ```bash
 python run_merfish_pipeline.py \
@@ -129,7 +159,12 @@ python run_merfish_pipeline.py \
 - `--python-exe`: Python executable used to launch sub-scripts
 - `--scripts-dir`: script directory (defaults to current file location)
 - `--skip-step1` / `--skip-step2`: skip a step
+- `--run-step3`: enable optional embedding/integration step
 - `--dry-run`: print commands without execution
+- Unified plotting args:
+  - `--point-size` (used by Step1 and Step3)
+  - `--dpi` (used by Step1/Step2/Step3)
+  - `--figure-width` / `--figure-min-height` / `--figure-max-height`
 
 ### Step 1
 - `--download-base`
@@ -150,6 +185,18 @@ python run_merfish_pipeline.py \
 - `--normalization` (`none` / `log1p_cpm`)
 - `--grid-aggregate` (`sum` / `mean`)
 
+### Step 3 (optional)
+- `--reference-datasets` / `--reference-dataset`
+- `--cell-metadata-file`
+- `--cluster-col`
+- `--integration-pcs`
+- `--integration-features`
+- `--max-reference-cells`
+- `--enable-reference-downsampling` / `--disable-reference-downsampling`
+- `--label-transfer-k-weight`
+- `--embedding-script` (override path to `embedding_merfish.py`)
+
+
 ---
 
 
@@ -158,6 +205,8 @@ python run_merfish_pipeline.py \
 - Step 2 groups samples automatically using relative paths under `--cluster-input-dir`.
 - If you changed Step 1 output locations, explicitly set `--cluster-input-dir`.
 - Keep `grid-block-um / grid-gap-um` consistent across both steps to ensure geometric alignment.
+- Step 3 reads merged clustered h5ad from Step 2 output; run Step 2 first (or provide existing outputs).
+- For memory-limited environments, keep reference downsampling enabled (default) and tune `--max-reference-cells`.
 
 ---
 
@@ -166,5 +215,6 @@ python run_merfish_pipeline.py \
 This project utilizes data from the **Allen Brain Cell Atlas (ABC Atlas)**. 
 
 - **Data Source:** Allen Institute for Brain Science ([Link](https://alleninstitute.github.io/abc_atlas_access/intro.html)).
+- **Dataset Used in This Workflow:** Whole Mouse Brain (WMB) dataset ([Link](https://alleninstitute.github.io/abc_atlas_access/descriptions/WMB_dataset.html)). Zhuang-ABCA dataset ([Link](https://alleninstitute.github.io/abc_atlas_access/descriptions/Zhuang_dataset.html)).
 - **Access Tool:** We use the [abc_atlas_access](https://github.com/AllenInstitute/abc_atlas_access) library. (manifest version = 20260228)
-- **License Note:** Data is provided under the Allen Institute Terms of Use. Please cite the primary ABC Atlas publication (Zhuang et al., 2023) when using this pipeline ([Link](https://alleninstitute.github.io/abc_atlas_access/descriptions/Zhuang_dataset.html)).
+- **License Note:** Data is provided under the Allen Institute Terms of Use. Please cite the primary ABC Atlas publication when using this pipeline 
