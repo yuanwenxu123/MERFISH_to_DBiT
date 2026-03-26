@@ -217,4 +217,4 @@ This project utilizes data from the **Allen Brain Cell Atlas (ABC Atlas)**.
 - **Data Source:** Allen Institute for Brain Science ([Link](https://alleninstitute.github.io/abc_atlas_access/intro.html)).
 - **Dataset Used in This Workflow:** Whole Mouse Brain (WMB) dataset ([Link](https://alleninstitute.github.io/abc_atlas_access/descriptions/WMB_dataset.html)). Zhuang-ABCA dataset ([Link](https://alleninstitute.github.io/abc_atlas_access/descriptions/Zhuang_dataset.html)).
 - **Access Tool:** We use the [abc_atlas_access](https://github.com/AllenInstitute/abc_atlas_access) library. (manifest version = 20260228)
-- **License Note:** Data is provided under the Allen Institute Terms of Use. Please cite the primary ABC Atlas publication when using this pipeline 
+- **License Note:** Data is provided under the Allen Institute Terms of Use. Please cite the primary ABC Atlas publication when using this pipeline.
