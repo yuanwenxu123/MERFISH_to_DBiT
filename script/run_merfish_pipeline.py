@@ -71,6 +71,11 @@ def parse_args():
                         help='Line width for plots')
     parser.add_argument('--marker-size', type=int, default=8,
                         help='Marker size for plots')
+    
+    parser.add_argument('--RA', type=float, default=3.0, help='The number of RA per grids')
+    parser.add_argument('--TA', type=float, default=4.5, help='The number of TA per grids')
+    parser.add_argument('--informative_UMI', type=float, default=0.2, help='Proportion of informative UMI')
+    parser.add_argument('--cutoff', type=int, default=200, help='Cutoff for informative UMI number')
 
     parser.add_argument("--cluster-input-glob", type=str, default="**/*.h5ad")
     parser.add_argument("--embedding-dim", type=int, default=30)
@@ -201,9 +206,24 @@ def build_step1_5_cmd(args, step1_5_script: Path, input_dir: Path, output_dir: P
         "--figure-width-1-5", str(args.figure_width_1_5),
         "--figure-height-1-5", str(args.figure_height_1_5),
         "--line-width", str(args.line_width),
-        "--marker-size", str(args.marker_size)
+        "--marker-size", str(args.marker_size),
     ]
     return cmd
+
+
+def build_step_simulation_cmd(args, simulation_script: Path, input_file: Path):
+    cmd = [
+        args.python_exe,
+        str(simulation_script),
+        "--input", str(input_file),
+        "--RA", str(args.RA),
+        "--TA", str(args.TA),
+        "--informative_UMI", str(args.informative_UMI),
+        "--cutoff", str(args.cutoff),
+        "--dpi", str(args.dpi),
+    ]
+    return cmd
+
 
 def build_step3_cmd(args, step3_script: Path):
     cmd = [
@@ -250,6 +270,7 @@ def main():
     scripts_dir = args.scripts_dir.resolve()
     step1_script = scripts_dir / "ccf_registration_to_image.py"
     step1_5_script = scripts_dir / "analyze_substructure_distribution.py"
+    step_simulation_script = scripts_dir / "DARLIN_simulation.py"
     step2_script = scripts_dir / "cluster_sampled_h5ad.py"
     step3_script = scripts_dir / "embedding_merfish.py"
 
@@ -293,6 +314,11 @@ def main():
         step1_5_output_dir = args.download_base.parent / f"output_{args.expression_matrix_kind}" / "analysis_substructure_distribution"
         step1_5_cmd = build_step1_5_cmd(args, step1_5_script, step1_5_input_dir, step1_5_output_dir)
         run_cmd(step1_5_cmd, dry_run=args.dry_run)
+
+        step_simulation_input = step1_5_output_dir / f'substructure_span_summary_{args.interp_spacing_um}um.csv'
+        step_simulation_cmd = build_step_simulation_cmd(args, step_simulation_script, step_simulation_input)
+        run_cmd(step_simulation_cmd, dry_run=args.dry_run)
+
 
     if not args.skip_step2:
         step2_cmd = build_step2_cmd(args, step2_script, cluster_input_dir, cluster_output_dir)

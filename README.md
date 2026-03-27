@@ -4,8 +4,8 @@ This folder provides a master controller to run the full pipeline end-to-end:
 
 1. Step 1: `ccf_registration_to_image.py`  
    (CCF visualization + grid sampling + sampled h5ad export)
-2. Step 1.5: `analyze_substructure_distribution.py`  
-   (Quantity analysis + interpolation)
+2. Step 1.5: `analyze_substructure_distribution.py` and `DARLIN_simulation.py`  
+   (Quantity analysis + interpolation + DARLINA simulation)
 3. Step 2: `cluster_sampled_h5ad.py`  
    (grid-level aggregation + Leiden clustering + single/merged outputs)
 4. Step 3 (optional): `embedding_merfish.py`  
@@ -65,12 +65,21 @@ Use `--run-step3` to additionally run embedding/integration.
   - `sampling_stats_*.txt`
 
 ### step 1.5 (default)
+
+#### Interpolation
 - Input: `<download-base>/../output_<expression-matrix-kind>/sampled_h5ad`
 - Output: `<download-base>/../output_<expression-matrix-kind>/analysis_substructure_distribution`
 - Main outputs:
   - `individual_substructure_plots_interp/`
   - `individual_substructure_plots_raw/`
   - `substructure_span_summary.csv`
+
+#### DARLIN simulation
+- Input: `<download-base>/../output_<expression-matrix-kind>/analysis_substructure_distribution/substructure_span_summary_*um.csv`
+- Output: `<download-base>/../output_<expression-matrix-kind>/analysis_substructure_distribution/simulated_darlin`
+- Main outputs: 
+  - `substructure_span_summary_*um_simulated_darlin_data.csv`
+  - `substructure_span_summary_*um_*.png`
 
 ### Step 2 (default)
 - Input: `<download-base>/../output_<expression-matrix-kind>/sampled_h5ad`
@@ -186,6 +195,8 @@ python run_merfish_pipeline.py \
 - `--step1-export-sampling-mask` / `--step1-no-export-sampling-mask`
 
 ### Step 1.5
+
+#### Interpolation
 - `--datasets`
 - `--section-spacing-um`
 - `--interp-spacing-um`
@@ -193,6 +204,11 @@ python run_merfish_pipeline.py \
 - `--figure-height-1-5`
 - `--line-width`
 - `-marker-size`
+#### DARLIN simulation
+- `--RA`
+- `--TA`
+- `--informative_UMI`
+- `-cutoff`
 
 ### Step 2
 - `--cluster-input-dir` / `--cluster-output-dir`
