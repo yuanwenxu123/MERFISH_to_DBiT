@@ -279,7 +279,7 @@ def main():
     print(f"run_step3          : {args.run_step3}")
     print(f"dry_run            : {args.dry_run}")
 
-    if args.skip_step1 and args.skip_step2 and (not args.run_step3):
+    if args.skip_step1 and args.skip_step2 and (not args.run_step3) and args.skip_step1_5:
         print("All selected steps are skipped. Nothing to run.")
         return
 

@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 from scipy import sparse
+import random
 from sklearn.decomposition import PCA, TruncatedSVD
 
 
@@ -531,7 +532,8 @@ def process_merged_sample(sample_key: str, file_paths: list[Path], dirs: dict, a
 
 def main():
     args = parse_args()
-
+    random.seed(args.random_state)
+    np.random.seed(args.random_state)
     input_files = sorted([p for p in args.input_dir.glob(args.input_glob) if p.is_file()]) if args.input_dir.is_dir() else []
     if len(input_files) == 0:
         raise FileNotFoundError(f"No files found under {args.input_dir} with pattern {args.input_glob}")

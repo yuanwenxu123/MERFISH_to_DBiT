@@ -178,7 +178,7 @@ def aggregate_substructure_stats(input_dir, datasets):
 
 
 def _plot_substructure_curve(x_vals, cells_vals, grids_vals, title, output_path, args):
-    fig, ax1 = plt.subplots(figsize=(args.figure_width, args.figure_height))
+    fig, ax1 = plt.subplots(figsize=(args.figure_width_1_5, args.figure_height_1_5))
 
     color_cells = '#1f77b4'
     ax1.set_xlabel('Distance between brain sections (µm)', fontsize=12, fontweight='bold')
@@ -239,8 +239,8 @@ def create_line_plots(stats_df, output_dir, args, dataset_spacing_map):
     """Create per-substructure raw and interpolated plots for each dataset."""
     output_dir.mkdir(exist_ok=True, parents=True)
 
-    substructure_raw_dir = output_dir / 'individual_substructure_plots_raw'
-    substructure_interp_dir = output_dir / 'individual_substructure_plots_interp'
+    substructure_raw_dir = output_dir / f'individual_substructure_plots_raw_{args.interp_spacing_um}um'
+    substructure_interp_dir = output_dir / f'individual_substructure_plots_interp_{args.interp_spacing_um}um'
     substructure_raw_dir.mkdir(exist_ok=True, parents=True)
     substructure_interp_dir.mkdir(exist_ok=True, parents=True)
     
@@ -299,7 +299,6 @@ def create_line_plots(stats_df, output_dir, args, dataset_spacing_map):
                 output_path=raw_plot_path,
                 args=args,
             )
-            print(f"Saved raw: {dataset_name}/{raw_plot_path.name}")
             saved_raw_count += 1
             start_um = x_vals[0] if len(x_vals) > 0 else 0
             end_um = x_vals[-1] if len(x_vals) > 0 else 0
@@ -347,13 +346,74 @@ def create_line_plots(stats_df, output_dir, args, dataset_spacing_map):
                 output_path=interp_plot_path,
                 args=args,
             )
-            print(f"Saved interp: {dataset_name}/{interp_plot_path.name}")
             saved_interp_count += 1
 
     print(f"\n✓ Created {saved_raw_count} raw substructure plots")
     print(f"✓ Created {saved_interp_count} interpolated substructure plots")
     
     return summary_records
+
+
+def plot_bar(stats_df, output_path, args):
+    """Create a bar plot showing the number of cells and grids for each substructure across datasets."""
+    agg_df = stats_df.groupby(['dataset', 'substructure'], as_index=False).agg({
+        'raw_cell_number': 'sum',
+        'raw_grid_number': 'sum',
+        'interp_cell_number': 'sum',
+        'interp_grid_number': 'sum',
+    })
+
+    substructures = sorted(agg_df['substructure'].unique())
+    datasets = sorted(agg_df['dataset'].unique())
+    
+    x = np.arange(len(substructures))
+    
+    for _, dataset_name in enumerate(datasets):
+        dataset_data = agg_df[agg_df['dataset'] == dataset_name]
+        raw_cells_vals = [dataset_data[dataset_data['substructure'] == sub]['raw_cell_number'].values[0] if sub in dataset_data['substructure'].values else 0 for sub in substructures]
+        raw_grids_vals = [dataset_data[dataset_data['substructure'] == sub]['raw_grid_number'].values[0] if sub in dataset_data['substructure'].values else 0 for sub in substructures]
+        inter_cells_vals = [dataset_data[dataset_data['substructure'] == sub]['interp_cell_number'].values[0] if sub in dataset_data['substructure'].values else 0 for sub in substructures]
+        interp_grids_vals = [dataset_data[dataset_data['substructure'] == sub]['interp_grid_number'].values[0] if sub in dataset_data['substructure'].values else 0 for sub in substructures]
+        fig, ax = plt.subplots(2, 1, figsize=(max(10, len(substructures) * 0.3), 8))
+
+        ax[0].bar(x, raw_cells_vals, label=f'{dataset_name} - Raw Cells', alpha=0.7)
+        ax[0].set_ylabel('Count', fontsize=12, fontweight='bold')
+        ax[0].set_xticks(x)
+        ax[0].set_xticklabels(substructures, rotation=45, ha='right', fontsize=12)
+        ax[0].legend(fontsize=10)
+        ax[0].grid(True, alpha=0.3, linestyle='--')
+
+        ax[1].bar(x, raw_grids_vals, label=f'{dataset_name} - Raw Grids', alpha=0.7)
+        ax[1].set_xlabel('Substructure', fontsize=14, fontweight='bold')
+        ax[1].set_ylabel('Count', fontsize=12, fontweight='bold')
+        ax[1].set_xticks(x)
+        ax[1].set_xticklabels(substructures, rotation=45, ha='right', fontsize=12)
+        ax[1].legend(fontsize=10)
+        ax[1].grid(True, alpha=0.3, linestyle='--')
+
+        plt.tight_layout()
+        plt.savefig(output_path / f'{dataset_name}_cell_grid_counts_{args.interp_spacing_um}um.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+        fig, ax = plt.subplots(2, 1, figsize=(max(10, len(substructures) * 0.3), 8))
+        ax[0].bar(x, inter_cells_vals, label=f'{dataset_name} - Cells (Interp)', alpha=0.7)
+        ax[0].set_ylabel('Count', fontsize=12, fontweight='bold')
+        ax[0].set_xticks(x)
+        ax[0].set_xticklabels(substructures, rotation=45, ha='right', fontsize=12)
+        ax[0].legend(fontsize=10)
+        ax[0].grid(True, alpha=0.3, linestyle='--')
+
+        ax[1].bar(x, interp_grids_vals, label=f'{dataset_name} - Grids (Interp)', alpha=0.7)
+        ax[1].set_xlabel('Substructure', fontsize=14, fontweight='bold')
+        ax[1].set_ylabel('Count', fontsize=12, fontweight='bold')
+        ax[1].set_xticks(x)
+        ax[1].set_xticklabels(substructures, rotation=45, ha='right', fontsize=12)
+        ax[1].legend(fontsize=10)
+        ax[1].grid(True, alpha=0.3, linestyle='--')
+
+        plt.tight_layout()
+        plt.savefig(output_path / f'{dataset_name}_interp_cell_grid_counts_{args.interp_spacing_um}um.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
 
 
 def main():
@@ -384,9 +444,13 @@ def main():
     print("\n=== Creating line plots ===")
     summary_records = create_line_plots(stats_df, args.output_dir, args, dataset_spacing_map)
 
-    summary_csv_path = args.output_dir / 'substructure_span_summary.csv'
+    summary_csv_path = args.output_dir / f'substructure_span_summary_{args.interp_spacing_um}um.csv'
     pd.DataFrame(summary_records).to_csv(summary_csv_path, index=False)
     print(f"Saved span summary: {summary_csv_path}")
+
+    print("\n=== Creating bar plots ===")
+    plot_bar(pd.DataFrame(summary_records), args.output_dir, args)
+    print(f"Saved bar plots for each dataset in: {args.output_dir}")
     
     print("\n=== Analysis complete ===")
 
